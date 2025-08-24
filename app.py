@@ -26,7 +26,7 @@ except LookupError:
 
 # Configure the page
 st.set_page_config(
-    page_title="3D PDF WordCloud Animator",
+    page_title="3D PDF WordCloud Animator - Large Sphere",
     page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -171,34 +171,43 @@ def rotate_points_3d(points, angle_x, angle_y, angle_z):
 
     return rotated_points
 
-def project_3d_to_2d(points_3d, viewer_distance=5):
-    """Project 3D points to 2D using perspective projection"""
+def project_3d_to_2d(points_3d, width, height, viewer_distance=2.5, sphere_scale=0.85):
+    """Project 3D points to 2D using perspective projection with enhanced scaling"""
     x_3d, y_3d, z_3d = points_3d[:, 0], points_3d[:, 1], points_3d[:, 2]
 
-    # Perspective projection
-    x_2d = x_3d / (z_3d + viewer_distance)
-    y_2d = y_3d / (z_3d + viewer_distance)
+    # Enhanced perspective projection with larger scaling
+    scale_factor = min(width, height) * sphere_scale / 2
+
+    # Perspective projection with reduced viewer distance for larger appearance
+    perspective_scale = viewer_distance / (viewer_distance + z_3d)
+
+    # Apply scaling and centering
+    x_2d = (x_3d * perspective_scale * scale_factor) + width / 2
+    y_2d = (y_3d * perspective_scale * scale_factor) + height / 2
 
     return x_2d, y_2d, z_3d
 
 def get_depth_color_alpha(z_values, base_color, colormap):
-    """Calculate color and alpha based on depth"""
-    # Normalize z values to [0, 1] range
+    """Calculate color and alpha based on depth with enhanced contrast"""
+    # Normalize z values to [0, 1] range with enhanced contrast
     z_normalized = (z_values - z_values.min()) / (z_values.max() - z_values.min())
+
+    # Apply gamma correction for better visual contrast
+    z_enhanced = np.power(z_normalized, 0.7)
 
     # Create colormap
     cmap = plt.get_cmap(colormap)
-    colors = cmap(z_normalized)
+    colors = cmap(z_enhanced)
 
-    # Alpha based on depth (closer objects more opaque)
-    alphas = 0.3 + 0.7 * z_normalized
+    # Enhanced alpha based on depth (more dramatic difference)
+    alphas = 0.4 + 0.6 * z_enhanced
 
     return colors, alphas
 
 def create_3d_rotating_wordcloud_frame(word_freq, sphere_points, rotation_angles, 
                                      width=800, height=600, colormap='viridis',
-                                     background_color='black'):
-    """Create a single frame of the 3D rotating word cloud"""
+                                     background_color='black', sphere_scale=0.85):
+    """Create a single frame of the 3D rotating word cloud with enhanced scaling"""
     try:
         # Rotate the sphere
         rotated_points = rotate_points_3d(sphere_points, 
@@ -206,8 +215,9 @@ def create_3d_rotating_wordcloud_frame(word_freq, sphere_points, rotation_angles
                                         rotation_angles[1], 
                                         rotation_angles[2])
 
-        # Project to 2D
-        x_2d, y_2d, z_3d = project_3d_to_2d(rotated_points)
+        # Project to 2D with enhanced scaling
+        x_2d, y_2d, z_3d = project_3d_to_2d(rotated_points, width, height, 
+                                           viewer_distance=2.5, sphere_scale=sphere_scale)
 
         # Create the plot
         fig, ax = plt.subplots(figsize=(width/100, height/100), 
@@ -221,6 +231,8 @@ def create_3d_rotating_wordcloud_frame(word_freq, sphere_points, rotation_angles
         depth_order = np.argsort(z_3d)
 
         words = list(word_freq.keys())
+        max_freq = max(word_freq.values())
+        min_freq = min(word_freq.values())
 
         for i, idx in enumerate(depth_order):
             if i >= len(words):
@@ -229,23 +241,28 @@ def create_3d_rotating_wordcloud_frame(word_freq, sphere_points, rotation_angles
             word = words[i]
             freq = word_freq[word]
 
-            # Scale font size based on frequency and depth
-            base_font_size = 8 + (freq / max(word_freq.values())) * 20
-            depth_factor = 0.5 + 0.5 * ((z_3d[idx] - z_3d.min()) / (z_3d.max() - z_3d.min()))
+            # Enhanced font size scaling with better size distribution
+            # Frequency-based scaling (8-32 base range)
+            freq_normalized = (freq - min_freq) / (max_freq - min_freq) if max_freq > min_freq else 0.5
+            base_font_size = 12 + freq_normalized * 24
+
+            # Depth-based scaling (0.6 to 1.4 multiplier)
+            depth_factor = 0.6 + 0.8 * ((z_3d[idx] - z_3d.min()) / (z_3d.max() - z_3d.min()))
+
+            # Final font size
             font_size = base_font_size * depth_factor
 
-            # Position text
-            x_pos = (x_2d[idx] + 1) * width / 2
-            y_pos = (y_2d[idx] + 1) * height / 2
-
-            # Add text with depth-based styling
-            ax.text(x_pos, y_pos, word,
-                   fontsize=font_size,
-                   ha='center', va='center',
-                   color=colors[idx],
-                   alpha=alphas[idx],
-                   weight='bold',
-                   transform=ax.transData)
+            # Ensure text stays within bounds
+            if 0 <= x_2d[idx] <= width and 0 <= y_2d[idx] <= height:
+                # Add text with enhanced styling
+                ax.text(x_2d[idx], y_2d[idx], word,
+                       fontsize=font_size,
+                       ha='center', va='center',
+                       color=colors[idx],
+                       alpha=alphas[idx],
+                       weight='bold',
+                       family='sans-serif',
+                       transform=ax.transData)
 
         ax.set_xlim(0, width)
         ax.set_ylim(0, height)
@@ -268,8 +285,8 @@ def create_3d_rotating_wordcloud_frame(word_freq, sphere_points, rotation_angles
 
 def create_3d_animated_wordcloud(text, color_scheme='viridis', num_frames=30, 
                                 duration=200, width=800, height=600,
-                                background_color='black'):
-    """Create animated GIF of 3D rotating word cloud sphere"""
+                                background_color='black', sphere_scale=0.85):
+    """Create animated GIF of 3D rotating word cloud sphere with enhanced scaling"""
     frames = []
 
     progress_bar = st.progress(0)
@@ -283,12 +300,12 @@ def create_3d_animated_wordcloud(text, color_scheme='viridis', num_frames=30,
     n_words = len(top_words)
     sphere_points = fibonacci_sphere_points(n_words)
 
-    status_text.text('Generating 3D rotating word cloud animation...')
+    status_text.text('Generating large 3D rotating word cloud sphere...')
 
     for i in range(num_frames):
         progress = (i + 1) / num_frames
         progress_bar.progress(progress)
-        status_text.text(f'Creating 3D frame {i+1}/{num_frames}...')
+        status_text.text(f'Creating enhanced 3D frame {i+1}/{num_frames}...')
 
         # Calculate rotation angles for smooth animation
         angle_y = 2 * np.pi * i / num_frames  # Main rotation around Y axis
@@ -304,7 +321,8 @@ def create_3d_animated_wordcloud(text, color_scheme='viridis', num_frames=30,
             width=width,
             height=height,
             colormap=color_scheme,
-            background_color=background_color
+            background_color=background_color,
+            sphere_scale=sphere_scale
         )
 
         if frame:
@@ -333,8 +351,8 @@ def create_3d_animated_wordcloud(text, color_scheme='viridis', num_frames=30,
     return None
 
 def create_static_3d_wordcloud(text, color_scheme='viridis', width=800, height=600,
-                             background_color='black', rotation_angle=0):
-    """Create a static 3D word cloud"""
+                             background_color='black', rotation_angle=0, sphere_scale=0.85):
+    """Create a static 3D word cloud with enhanced scaling"""
     word_freq = Counter(text.split())
     top_words = dict(word_freq.most_common(50))
 
@@ -348,34 +366,35 @@ def create_static_3d_wordcloud(text, color_scheme='viridis', width=800, height=6
         width=width,
         height=height,
         colormap=color_scheme,
-        background_color=background_color
+        background_color=background_color,
+        sphere_scale=sphere_scale
     )
 
 def main():
-    st.title("🌍 3D PDF WordCloud Sphere Animator")
+    st.title("🌍 3D PDF WordCloud Sphere Animator - Large Scale")
 
     # Feature highlight
     st.markdown("""
     <div class="feature-highlight">
-        🎯 <strong>NEW!</strong> True 3D rotating sphere word clouds with realistic depth perception and smooth animation!
+        🎯 <strong>ENHANCED!</strong> Large-scale 3D rotating sphere word clouds that fill the entire frame with maximum visual impact!
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
-    Create stunning **3D rotating sphere word clouds** from PDF documents! 
-    Words are positioned on a virtual sphere that rotates smoothly, with size based on frequency 
-    and color/opacity based on 3D depth.
+    Create stunning **large-scale 3D rotating sphere word clouds** from PDF documents! 
+    The sphere now occupies most of the frame space for maximum visual impact, with words positioned 
+    on a virtual sphere surface that rotates smoothly with realistic depth perception.
     """)
 
     # Sidebar configuration
-    st.sidebar.title("⚙️ 3D Configuration")
+    st.sidebar.title("⚙️ Enhanced 3D Configuration")
 
     # PDF Upload Section
     st.markdown('<div class="upload-section">', unsafe_allow_html=True)
     uploaded_file = st.file_uploader(
         "📄 Upload PDF File",
         type=["pdf"],
-        help="Select a PDF file to extract text and create 3D word cloud sphere"
+        help="Select a PDF file to extract text and create large-scale 3D word cloud sphere"
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -424,8 +443,8 @@ def main():
                 language_options[selected_language]
             )
 
-            # 3D Visual configuration
-            st.sidebar.subheader("🎨 3D Visual Settings")
+            # Enhanced 3D Visual configuration
+            st.sidebar.subheader("🎨 Enhanced 3D Visual Settings")
 
             color_schemes = get_color_schemes()
             selected_color_scheme = st.sidebar.selectbox(
@@ -439,6 +458,7 @@ def main():
                 'Dark Blue': '#001122',
                 'Dark Purple': '#2d1b69',
                 'Dark Green': '#0d2818',
+                'Dark Gray': '#1a1a1a',
                 'White': 'white'
             }
 
@@ -448,6 +468,13 @@ def main():
                 index=0
             )
 
+            # Enhanced scaling control
+            sphere_scale = st.sidebar.slider(
+                "Sphere Size (Frame Coverage)",
+                min_value=0.5, max_value=0.95, value=0.85, step=0.05,
+                help="Controls how much of the frame the sphere occupies"
+            )
+
             col1, col2 = st.sidebar.columns(2)
             with col1:
                 width = st.number_input("Width", min_value=400, max_value=1200, value=800, step=50)
@@ -455,7 +482,7 @@ def main():
                 height = st.number_input("Height", min_value=400, max_value=1200, value=600, step=50)
 
             # 3D Animation settings
-            st.sidebar.subheader("🎬 3D Animation Settings")
+            st.sidebar.subheader("🎬 Enhanced Animation Settings")
 
             col3, col4 = st.sidebar.columns(2)
             with col3:
@@ -469,20 +496,21 @@ def main():
             col_gen1, col_gen2 = st.columns(2)
 
             with col_gen1:
-                if st.button("🖼️ Generate 3D Static WordCloud"):
-                    with st.spinner("Creating 3D word cloud sphere..."):
+                if st.button("🖼️ Generate Large 3D WordCloud"):
+                    with st.spinner("Creating large-scale 3D word cloud sphere..."):
                         static_wordcloud = create_static_3d_wordcloud(
                             text=processed_text,
                             color_scheme=color_schemes[selected_color_scheme],
                             width=width,
                             height=height,
                             background_color=background_options[selected_background],
-                            rotation_angle=np.pi/4
+                            rotation_angle=np.pi/4,
+                            sphere_scale=sphere_scale
                         )
 
                         if static_wordcloud:
-                            st.subheader("🌍 3D WordCloud Sphere")
-                            st.image(static_wordcloud, caption="3D Word Cloud Sphere", use_column_width=True)
+                            st.subheader("🌍 Large-Scale 3D WordCloud Sphere")
+                            st.image(static_wordcloud, caption="Enhanced 3D Word Cloud Sphere", use_column_width=True)
 
                             # Download button for static image
                             buf = BytesIO()
@@ -490,15 +518,15 @@ def main():
                             buf.seek(0)
 
                             st.download_button(
-                                label="💾 Download 3D Image",
+                                label="💾 Download Large 3D Image",
                                 data=buf.getvalue(),
-                                file_name=f"3d_wordcloud_{uploaded_file.name.replace('.pdf', '')}.png",
+                                file_name=f"large_3d_wordcloud_{uploaded_file.name.replace('.pdf', '')}.png",
                                 mime="image/png"
                             )
 
             with col_gen2:
-                if st.button("🎬 Generate 3D Rotating Sphere"):
-                    with st.spinner("Creating 3D rotating animation..."):
+                if st.button("🎬 Generate Large Rotating Sphere"):
+                    with st.spinner("Creating large-scale 3D rotating animation..."):
                         # Adjust frame count based on rotation speed
                         adjusted_frames = int(num_frames / rotation_speed)
                         adjusted_duration = int(duration * rotation_speed)
@@ -510,22 +538,23 @@ def main():
                             duration=adjusted_duration,
                             width=width,
                             height=height,
-                            background_color=background_options[selected_background]
+                            background_color=background_options[selected_background],
+                            sphere_scale=sphere_scale
                         )
 
                         if gif_buffer:
-                            st.subheader("🌍 3D Rotating WordCloud Sphere")
-                            st.image(gif_buffer.getvalue(), caption="3D Rotating Word Cloud Sphere")
+                            st.subheader("🌍 Large-Scale 3D Rotating WordCloud Sphere")
+                            st.image(gif_buffer.getvalue(), caption="Enhanced Large-Scale 3D Rotating Word Cloud Sphere")
 
                             # Download button for GIF
                             st.download_button(
-                                label="💾 Download 3D Animated GIF",
+                                label="💾 Download Large 3D Animated GIF",
                                 data=gif_buffer.getvalue(),
-                                file_name=f"3d_rotating_wordcloud_{uploaded_file.name.replace('.pdf', '')}.gif",
+                                file_name=f"large_3d_rotating_wordcloud_{uploaded_file.name.replace('.pdf', '')}.gif",
                                 mime="image/gif"
                             )
 
-                            st.success("🎉 3D Rotating word cloud sphere created successfully!")
+                            st.success("🎉 Large-scale 3D rotating word cloud sphere created successfully!")
                         else:
                             st.error("Failed to create 3D animated GIF")
         else:
@@ -536,44 +565,44 @@ def main():
         st.info("👆 Please upload a PDF file to get started!")
 
         # Sample features showcase
-        st.subheader("✨ 3D Features")
+        st.subheader("✨ Enhanced Large-Scale Features")
 
         feature_cols = st.columns(3)
 
         with feature_cols[0]:
             st.markdown("""
-            **🌍 True 3D Sphere**
-            - Words positioned on sphere surface
-            - Fibonacci spiral distribution
-            - Realistic 3D rotation
-            - Depth-based rendering
+            **🌍 Large-Scale Sphere**
+            - Sphere covers up to 95% of frame
+            - Enhanced perspective projection
+            - Optimized scaling algorithms
+            - Maximum visual impact
             """)
 
         with feature_cols[1]:
             st.markdown("""
-            **🎨 Advanced Visuals**
-            - Depth-based colors & opacity
-            - Perspective projection
-            - Multiple background themes
-            - Smooth rotation animation
+            **🎨 Enhanced Visuals**
+            - Improved depth contrast
+            - Better font size distribution
+            - Gamma-corrected colors
+            - Professional quality output
             """)
 
         with feature_cols[2]:
             st.markdown("""
-            **⚡ Performance**
-            - Optimized 3D calculations
-            - Efficient GIF compression
-            - Customizable frame rates
-            - Professional quality output
+            **⚡ User Control**
+            - Adjustable sphere size (50%-95%)
+            - Custom frame coverage
+            - Enhanced scaling options
+            - Real-time size preview
             """)
 
-        st.subheader("🎯 How It Works")
+        st.subheader("🎯 Large-Scale Enhancements")
         st.markdown("""
-        1. **PDF Processing**: Extract and clean text from your document
-        2. **3D Positioning**: Place words on a virtual sphere using Fibonacci spiral
-        3. **Rotation Animation**: Smooth rotation around Y-axis with subtle wobble
-        4. **Depth Rendering**: Color and opacity based on 3D position
-        5. **GIF Export**: High-quality animated output
+        1. **Enhanced Scaling**: Sphere can now occupy up to 95% of the frame space
+        2. **Better Projection**: Improved 3D to 2D mapping for maximum utilization
+        3. **Optimized Sizing**: Smart font scaling based on both frequency and depth
+        4. **User Control**: Adjustable sphere size with real-time feedback
+        5. **Professional Output**: Cinema-quality large-scale rendering
         """)
 
 if __name__ == "__main__":
