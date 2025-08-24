@@ -26,7 +26,7 @@ except LookupError:
 
 # Configure the page
 st.set_page_config(
-    page_title="3D PDF WordCloud Animator - Fixed Font Sizing",
+    page_title="3D PDF WordCloud - Dynamic Word Count",
     page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -56,6 +56,13 @@ st.markdown("""
 }
 .feature-highlight {
     background: linear-gradient(45deg, #f093fb 0%, #f5576c 100%);
+    padding: 1rem;
+    border-radius: 10px;
+    color: white;
+    margin: 1rem 0;
+}
+.word-stats {
+    background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
     padding: 1rem;
     border-radius: 10px;
     color: white;
@@ -100,6 +107,28 @@ def preprocess_text(text, custom_stopwords=None, language='english'):
     filtered_words = [word for word in words if word not in all_stopwords and len(word) > 2]
 
     return ' '.join(filtered_words)
+
+def analyze_word_statistics(text):
+    """Analyze word statistics from preprocessed text"""
+    if not text:
+        return {}, 0, 0
+
+    word_freq = Counter(text.split())
+    total_words = sum(word_freq.values())
+    unique_words = len(word_freq)
+
+    return word_freq, total_words, unique_words
+
+def calculate_word_count_range(unique_words):
+    """Calculate the word count range (60-100% of unique words)"""
+    min_words = max(10, int(unique_words * 0.6))  # At least 10 words, or 60%
+    max_words = unique_words
+
+    # Reasonable limits for visualization
+    min_words = min(min_words, 200)  # Cap at 200 for performance
+    max_words = min(max_words, 300)  # Cap at 300 for performance
+
+    return min_words, max_words
 
 def get_color_schemes():
     """Return available color schemes for word clouds"""
@@ -229,10 +258,25 @@ def create_word_position_mapping(word_freq, sphere_points):
 
     return word_positions
 
+def adjust_font_sizes_for_word_count(base_min_size, base_max_size, word_count):
+    """Adjust font size range based on number of words to maintain readability"""
+    if word_count <= 50:
+        # Fewer words - can use larger sizes
+        return base_min_size + 2, base_max_size + 5
+    elif word_count <= 100:
+        # Medium word count - normal sizes
+        return base_min_size, base_max_size
+    elif word_count <= 150:
+        # More words - slightly smaller sizes
+        return base_min_size - 2, base_max_size - 3
+    else:
+        # Many words - smaller sizes to fit more
+        return max(8, base_min_size - 4), max(25, base_max_size - 8)
+
 def create_3d_rotating_wordcloud_frame(word_freq, sphere_points, rotation_angles, 
                                      width=800, height=600, colormap='viridis',
                                      background_color='black', sphere_scale=0.85):
-    """Create a single frame of the 3D rotating word cloud with proper frequency-based font sizing"""
+    """Create a single frame of the 3D rotating word cloud with dynamic word count"""
     try:
         # Create word-position mapping
         word_positions = create_word_position_mapping(word_freq, sphere_points)
@@ -267,6 +311,11 @@ def create_3d_rotating_wordcloud_frame(word_freq, sphere_points, rotation_angles
         min_freq = min(frequencies)
         freq_range = max_freq - min_freq if max_freq > min_freq else 1
 
+        # Adjust font sizes based on word count
+        word_count = len(word_positions)
+        min_font_size, max_font_size = adjust_font_sizes_for_word_count(10, 40, word_count)
+        font_range = max_font_size - min_font_size
+
         # Sort by depth (furthest first) for proper rendering
         depth_order = np.argsort(z_3d)
 
@@ -284,8 +333,8 @@ def create_3d_rotating_wordcloud_frame(word_freq, sphere_points, rotation_angles
             # Normalize frequency to 0-1 range
             freq_normalized = (freq - min_freq) / freq_range if freq_range > 0 else 0.5
 
-            # Base font size: 10-40px range based on frequency
-            base_font_size = 10 + freq_normalized * 30
+            # Base font size using adjusted range
+            base_font_size = min_font_size + freq_normalized * font_range
 
             # Depth-based scaling (0.7 to 1.3 multiplier)
             depth_normalized = (z_3d[render_idx] - z_3d.min()) / (z_3d.max() - z_3d.min())
@@ -295,7 +344,7 @@ def create_3d_rotating_wordcloud_frame(word_freq, sphere_points, rotation_angles
             final_font_size = base_font_size * depth_factor
 
             # Ensure minimum readable size
-            final_font_size = max(final_font_size, 8)
+            final_font_size = max(final_font_size, 6)
 
             # Position text
             x_pos = x_2d[render_idx]
@@ -332,29 +381,29 @@ def create_3d_rotating_wordcloud_frame(word_freq, sphere_points, rotation_angles
         st.error(f"Error creating 3D frame: {str(e)}")
         return None
 
-def create_3d_animated_wordcloud(text, color_scheme='viridis', num_frames=30, 
+def create_3d_animated_wordcloud(text, selected_word_count, color_scheme='viridis', num_frames=30, 
                                 duration=200, width=800, height=600,
                                 background_color='black', sphere_scale=0.85):
-    """Create animated GIF of 3D rotating word cloud sphere with proper frequency-based sizing"""
+    """Create animated GIF of 3D rotating word cloud sphere with dynamic word count"""
     frames = []
 
     progress_bar = st.progress(0)
     status_text = st.empty()
 
-    # Get word frequencies and sort by frequency (most frequent first)
+    # Get word frequencies and select the specified number of words
     word_freq = Counter(text.split())
-    top_words = dict(word_freq.most_common(50))  # Use top 50 words
+    selected_words = dict(word_freq.most_common(selected_word_count))
 
-    # Generate sphere points for words
-    n_words = len(top_words)
+    # Generate sphere points for selected words
+    n_words = len(selected_words)
     sphere_points = fibonacci_sphere_points(n_words)
 
-    status_text.text('Generating frequency-based 3D rotating word cloud sphere...')
+    status_text.text(f'Generating 3D rotating word cloud with {n_words} words...')
 
     for i in range(num_frames):
         progress = (i + 1) / num_frames
         progress_bar.progress(progress)
-        status_text.text(f'Creating frame {i+1}/{num_frames} with frequency-based sizing...')
+        status_text.text(f'Creating frame {i+1}/{num_frames} with {n_words} words...')
 
         # Calculate rotation angles for smooth animation
         angle_y = 2 * np.pi * i / num_frames  # Main rotation around Y axis
@@ -364,7 +413,7 @@ def create_3d_animated_wordcloud(text, color_scheme='viridis', num_frames=30,
         rotation_angles = (angle_x, angle_y, angle_z)
 
         frame = create_3d_rotating_wordcloud_frame(
-            word_freq=top_words,
+            word_freq=selected_words,
             sphere_points=sphere_points,
             rotation_angles=rotation_angles,
             width=width,
@@ -399,17 +448,17 @@ def create_3d_animated_wordcloud(text, color_scheme='viridis', num_frames=30,
 
     return None
 
-def create_static_3d_wordcloud(text, color_scheme='viridis', width=800, height=600,
+def create_static_3d_wordcloud(text, selected_word_count, color_scheme='viridis', width=800, height=600,
                              background_color='black', rotation_angle=0, sphere_scale=0.85):
-    """Create a static 3D word cloud with proper frequency-based sizing"""
+    """Create a static 3D word cloud with dynamic word count"""
     word_freq = Counter(text.split())
-    top_words = dict(word_freq.most_common(50))
+    selected_words = dict(word_freq.most_common(selected_word_count))
 
-    sphere_points = fibonacci_sphere_points(len(top_words))
+    sphere_points = fibonacci_sphere_points(len(selected_words))
     rotation_angles = (0.2, rotation_angle, 0.1)
 
     return create_3d_rotating_wordcloud_frame(
-        word_freq=top_words,
+        word_freq=selected_words,
         sphere_points=sphere_points,
         rotation_angles=rotation_angles,
         width=width,
@@ -420,30 +469,29 @@ def create_static_3d_wordcloud(text, color_scheme='viridis', width=800, height=6
     )
 
 def main():
-    st.title("🌍 3D PDF WordCloud - Frequency-Based Font Sizing")
+    st.title("🌍 3D PDF WordCloud - Dynamic Word Count Control")
 
     # Feature highlight
     st.markdown("""
     <div class="feature-highlight">
-        🎯 <strong>FIXED!</strong> Font sizes now properly reflect word frequency - most frequent words appear largest!
+        🎯 <strong>NEW FEATURE!</strong> Control the number of words in your wordcloud - choose 60-100% of available unique words!
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
-    Create stunning **frequency-accurate 3D rotating sphere word clouds** from PDF documents! 
-    Each word's size now correctly reflects its frequency in the document, with the most common 
-    words appearing largest and less frequent words appearing smaller.
+    Create stunning **3D rotating sphere word clouds** with **customizable word count** from PDF documents! 
+    Choose how many words to include (60-100% of unique words) for optimal visualization density and detail.
     """)
 
     # Sidebar configuration
-    st.sidebar.title("⚙️ Frequency-Based 3D Configuration")
+    st.sidebar.title("⚙️ Dynamic Word Count Configuration")
 
     # PDF Upload Section
     st.markdown('<div class="upload-section">', unsafe_allow_html=True)
     uploaded_file = st.file_uploader(
         "📄 Upload PDF File",
         type=["pdf"],
-        help="Select a PDF file to extract text and create frequency-based 3D word cloud sphere"
+        help="Select a PDF file to analyze and create dynamic word count wordcloud"
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -492,133 +540,170 @@ def main():
                 language_options[selected_language]
             )
 
-            # Show word frequency preview
-            if processed_text:
-                word_freq = Counter(processed_text.split())
-                top_10_words = dict(word_freq.most_common(10))
+            # Analyze word statistics
+            word_freq, total_words, unique_words = analyze_word_statistics(processed_text)
 
-                with st.expander("📊 Top 10 Word Frequencies"):
-                    for i, (word, freq) in enumerate(top_10_words.items(), 1):
+            if unique_words > 0:
+                # Calculate word count range
+                min_words, max_words = calculate_word_count_range(unique_words)
+
+                # Display word statistics
+                st.markdown("""
+                <div class="word-stats">
+                    📊 <strong>Document Word Analysis</strong><br>
+                    • Total words (after preprocessing): {:,}<br>
+                    • Unique words available: {:,}<br>
+                    • Word count range: {:,} - {:,} words (60-100%)
+                </div>
+                """.format(total_words, unique_words, min_words, max_words), unsafe_allow_html=True)
+
+                # Word count selection
+                st.sidebar.subheader("📈 Dynamic Word Count Selection")
+
+                selected_word_count = st.sidebar.slider(
+                    "Number of Words to Include",
+                    min_value=min_words,
+                    max_value=max_words,
+                    value=min(100, max_words),  # Default to 100 or max available
+                    step=5,
+                    help=f"Select between {min_words} and {max_words} words (60-100% of unique words)"
+                )
+
+                # Show percentage and word count info
+                percentage = (selected_word_count / unique_words) * 100
+                st.sidebar.info(f"**Selected**: {selected_word_count} words ({percentage:.1f}% of unique words)")
+
+                # Show top words preview based on selection
+                top_preview_words = dict(word_freq.most_common(min(20, selected_word_count)))
+
+                with st.expander(f"📊 Preview of Top {min(20, selected_word_count)} Selected Words"):
+                    for i, (word, freq) in enumerate(top_preview_words.items(), 1):
                         st.write(f"{i}. **{word}**: {freq} occurrences")
+                    if selected_word_count > 20:
+                        st.write(f"... and {selected_word_count - 20} more words")
 
-            # Enhanced 3D Visual configuration
-            st.sidebar.subheader("🎨 Frequency-Based Visual Settings")
+                # Enhanced 3D Visual configuration
+                st.sidebar.subheader("🎨 Visual Settings")
 
-            color_schemes = get_color_schemes()
-            selected_color_scheme = st.sidebar.selectbox(
-                "Color Theme",
-                options=list(color_schemes.keys()),
-                index=0
-            )
+                color_schemes = get_color_schemes()
+                selected_color_scheme = st.sidebar.selectbox(
+                    "Color Theme",
+                    options=list(color_schemes.keys()),
+                    index=0
+                )
 
-            background_options = {
-                'Black': 'black',
-                'Dark Blue': '#001122',
-                'Dark Purple': '#2d1b69',
-                'Dark Green': '#0d2818',
-                'Dark Gray': '#1a1a1a',
-                'White': 'white'
-            }
+                background_options = {
+                    'Black': 'black',
+                    'Dark Blue': '#001122',
+                    'Dark Purple': '#2d1b69',
+                    'Dark Green': '#0d2818',
+                    'Dark Gray': '#1a1a1a',
+                    'White': 'white'
+                }
 
-            selected_background = st.sidebar.selectbox(
-                "Background Color",
-                options=list(background_options.keys()),
-                index=0
-            )
+                selected_background = st.sidebar.selectbox(
+                    "Background Color",
+                    options=list(background_options.keys()),
+                    index=0
+                )
 
-            # Enhanced scaling control
-            sphere_scale = st.sidebar.slider(
-                "Sphere Size (Frame Coverage)",
-                min_value=0.5, max_value=0.95, value=0.85, step=0.05,
-                help="Controls how much of the frame the sphere occupies"
-            )
+                # Enhanced scaling control
+                sphere_scale = st.sidebar.slider(
+                    "Sphere Size (Frame Coverage)",
+                    min_value=0.5, max_value=0.95, value=0.85, step=0.05,
+                    help="Controls how much of the frame the sphere occupies"
+                )
 
-            col1, col2 = st.sidebar.columns(2)
-            with col1:
-                width = st.number_input("Width", min_value=400, max_value=1200, value=800, step=50)
-            with col2:
-                height = st.number_input("Height", min_value=400, max_value=1200, value=600, step=50)
+                col1, col2 = st.sidebar.columns(2)
+                with col1:
+                    width = st.number_input("Width", min_value=400, max_value=1200, value=800, step=50)
+                with col2:
+                    height = st.number_input("Height", min_value=400, max_value=1200, value=600, step=50)
 
-            # Font size range control
-            st.sidebar.subheader("📝 Font Size Settings")
-            st.sidebar.info("Font sizes automatically scale from 10px (least frequent) to 40px (most frequent)")
+                # Font size information based on word count
+                min_font, max_font = adjust_font_sizes_for_word_count(10, 40, selected_word_count)
+                st.sidebar.info(f"**Auto Font Size Range**: {min_font}px - {max_font}px\n(Optimized for {selected_word_count} words)")
 
-            # 3D Animation settings
-            st.sidebar.subheader("🎬 Animation Settings")
+                # 3D Animation settings
+                st.sidebar.subheader("🎬 Animation Settings")
 
-            col3, col4 = st.sidebar.columns(2)
-            with col3:
-                num_frames = st.slider("Rotation Frames", min_value=15, max_value=60, value=30)
-            with col4:
-                duration = st.slider("Frame Speed (ms)", min_value=100, max_value=500, value=200)
+                col3, col4 = st.sidebar.columns(2)
+                with col3:
+                    num_frames = st.slider("Rotation Frames", min_value=15, max_value=60, value=30)
+                with col4:
+                    duration = st.slider("Frame Speed (ms)", min_value=100, max_value=500, value=200)
 
-            rotation_speed = st.sidebar.slider("Rotation Speed", min_value=0.5, max_value=2.0, value=1.0, step=0.1)
+                rotation_speed = st.sidebar.slider("Rotation Speed", min_value=0.5, max_value=2.0, value=1.0, step=0.1)
 
-            # Generate buttons
-            col_gen1, col_gen2 = st.columns(2)
+                # Generate buttons
+                col_gen1, col_gen2 = st.columns(2)
 
-            with col_gen1:
-                if st.button("🖼️ Generate Frequency-Based 3D WordCloud"):
-                    with st.spinner("Creating frequency-based 3D word cloud sphere..."):
-                        static_wordcloud = create_static_3d_wordcloud(
-                            text=processed_text,
-                            color_scheme=color_schemes[selected_color_scheme],
-                            width=width,
-                            height=height,
-                            background_color=background_options[selected_background],
-                            rotation_angle=np.pi/4,
-                            sphere_scale=sphere_scale
-                        )
-
-                        if static_wordcloud:
-                            st.subheader("🌍 Frequency-Based 3D WordCloud Sphere")
-                            st.image(static_wordcloud, caption="3D Word Cloud with Frequency-Based Font Sizes", use_column_width=True)
-
-                            # Download button for static image
-                            buf = BytesIO()
-                            static_wordcloud.save(buf, format='PNG')
-                            buf.seek(0)
-
-                            st.download_button(
-                                label="💾 Download Frequency-Based 3D Image",
-                                data=buf.getvalue(),
-                                file_name=f"frequency_3d_wordcloud_{uploaded_file.name.replace('.pdf', '')}.png",
-                                mime="image/png"
+                with col_gen1:
+                    if st.button(f"🖼️ Generate 3D WordCloud ({selected_word_count} words)"):
+                        with st.spinner(f"Creating 3D word cloud with {selected_word_count} words..."):
+                            static_wordcloud = create_static_3d_wordcloud(
+                                text=processed_text,
+                                selected_word_count=selected_word_count,
+                                color_scheme=color_schemes[selected_color_scheme],
+                                width=width,
+                                height=height,
+                                background_color=background_options[selected_background],
+                                rotation_angle=np.pi/4,
+                                sphere_scale=sphere_scale
                             )
 
-            with col_gen2:
-                if st.button("🎬 Generate Frequency-Based Rotating Sphere"):
-                    with st.spinner("Creating frequency-based 3D rotating animation..."):
-                        # Adjust frame count based on rotation speed
-                        adjusted_frames = int(num_frames / rotation_speed)
-                        adjusted_duration = int(duration * rotation_speed)
+                            if static_wordcloud:
+                                st.subheader(f"🌍 3D WordCloud Sphere - {selected_word_count} Words ({percentage:.1f}%)")
+                                st.image(static_wordcloud, caption=f"3D Word Cloud with {selected_word_count} words", use_column_width=True)
 
-                        gif_buffer = create_3d_animated_wordcloud(
-                            text=processed_text,
-                            color_scheme=color_schemes[selected_color_scheme],
-                            num_frames=adjusted_frames,
-                            duration=adjusted_duration,
-                            width=width,
-                            height=height,
-                            background_color=background_options[selected_background],
-                            sphere_scale=sphere_scale
-                        )
+                                # Download button for static image
+                                buf = BytesIO()
+                                static_wordcloud.save(buf, format='PNG')
+                                buf.seek(0)
 
-                        if gif_buffer:
-                            st.subheader("🌍 Frequency-Based 3D Rotating WordCloud Sphere")
-                            st.image(gif_buffer.getvalue(), caption="3D Rotating Word Cloud with Frequency-Based Font Sizes")
+                                st.download_button(
+                                    label=f"💾 Download 3D Image ({selected_word_count} words)",
+                                    data=buf.getvalue(),
+                                    file_name=f"3d_wordcloud_{selected_word_count}words_{uploaded_file.name.replace('.pdf', '')}.png",
+                                    mime="image/png"
+                                )
 
-                            # Download button for GIF
-                            st.download_button(
-                                label="💾 Download Frequency-Based 3D Animated GIF",
-                                data=gif_buffer.getvalue(),
-                                file_name=f"frequency_3d_rotating_wordcloud_{uploaded_file.name.replace('.pdf', '')}.gif",
-                                mime="image/gif"
+                with col_gen2:
+                    if st.button(f"🎬 Generate Rotating Sphere ({selected_word_count} words)"):
+                        with st.spinner(f"Creating 3D rotating animation with {selected_word_count} words..."):
+                            # Adjust frame count based on rotation speed
+                            adjusted_frames = int(num_frames / rotation_speed)
+                            adjusted_duration = int(duration * rotation_speed)
+
+                            gif_buffer = create_3d_animated_wordcloud(
+                                text=processed_text,
+                                selected_word_count=selected_word_count,
+                                color_scheme=color_schemes[selected_color_scheme],
+                                num_frames=adjusted_frames,
+                                duration=adjusted_duration,
+                                width=width,
+                                height=height,
+                                background_color=background_options[selected_background],
+                                sphere_scale=sphere_scale
                             )
 
-                            st.success("🎉 Frequency-based 3D rotating word cloud sphere created successfully!")
-                        else:
-                            st.error("Failed to create 3D animated GIF")
+                            if gif_buffer:
+                                st.subheader(f"🌍 3D Rotating WordCloud Sphere - {selected_word_count} Words ({percentage:.1f}%)")
+                                st.image(gif_buffer.getvalue(), caption=f"3D Rotating Word Cloud with {selected_word_count} words")
+
+                                # Download button for GIF
+                                st.download_button(
+                                    label=f"💾 Download 3D Animated GIF ({selected_word_count} words)",
+                                    data=gif_buffer.getvalue(),
+                                    file_name=f"3d_rotating_wordcloud_{selected_word_count}words_{uploaded_file.name.replace('.pdf', '')}.gif",
+                                    mime="image/gif"
+                                )
+
+                                st.success(f"🎉 3D rotating word cloud with {selected_word_count} words created successfully!")
+                            else:
+                                st.error("Failed to create 3D animated GIF")
+            else:
+                st.error("❌ No valid words found after preprocessing. Please check your document or stopword settings.")
         else:
             st.error("❌ Failed to extract text from PDF. Please check if the file is valid.")
 
@@ -627,46 +712,52 @@ def main():
         st.info("👆 Please upload a PDF file to get started!")
 
         # Sample features showcase
-        st.subheader("✨ Frequency-Based Features")
+        st.subheader("✨ Dynamic Word Count Features")
 
         feature_cols = st.columns(3)
 
         with feature_cols[0]:
             st.markdown("""
-            **📊 True Frequency Scaling**
-            - Font size: 10px to 40px range
-            - Most frequent = largest words
-            - Least frequent = smallest words
-            - Accurate frequency mapping
+            **📈 Smart Word Selection**
+            - 60-100% of unique words
+            - Automatic range calculation
+            - Performance-optimized limits
+            - Real-time percentage display
             """)
 
         with feature_cols[1]:
             st.markdown("""
-            **🎨 Enhanced Visuals**
-            - Word-position mapping system
-            - Proper frequency calculation
-            - Top 50 most frequent words
-            - Professional quality rendering
+            **🎨 Adaptive Visualization**
+            - Font sizes adjust to word count
+            - Optimal readability maintained
+            - Sphere density optimization
+            - Professional quality output
             """)
 
         with feature_cols[2]:
             st.markdown("""
-            **⚡ Smart Features**
-            - Automatic frequency analysis
-            - Top 10 words preview
-            - Minimum readable font size (8px)
-            - Optimized word distribution
+            **⚡ User Control**
+            - Slider-based word selection
+            - Live preview of selections
+            - Word statistics display
+            - Customizable file naming
             """)
 
-        st.subheader("🎯 How Frequency-Based Sizing Works")
+        st.subheader("🎯 How Dynamic Word Count Works")
         st.markdown("""
-        1. **Word Frequency Analysis**: Count occurrences of each word in the document
-        2. **Top Word Selection**: Choose the 50 most frequent words for display
-        3. **Frequency Normalization**: Scale frequencies to 0-1 range
-        4. **Font Size Calculation**: Map frequencies to 10-40px font size range
-        5. **Depth Adjustment**: Apply 3D depth factor (0.7x to 1.3x) for realism
-        6. **Sphere Positioning**: Place words on Fibonacci spiral distribution
-        7. **Smooth Animation**: Rotate sphere while maintaining size relationships
+        1. **Document Analysis**: Extract and analyze all unique words from your PDF
+        2. **Range Calculation**: Determine 60-100% range based on available words
+        3. **Smart Limits**: Apply performance caps (200-300 words max) for optimal rendering
+        4. **Word Selection**: Use slider to choose exact number of words to include
+        5. **Font Optimization**: Automatically adjust font sizes for selected word count
+        6. **Sphere Generation**: Create Fibonacci distribution for selected words
+        7. **Quality Output**: Generate high-quality 3D wordcloud with optimal density
+
+        **Benefits:**
+        - **More Detail**: Include up to 300 words vs. fixed 50
+        - **Better Coverage**: Capture 60-100% of document vocabulary
+        - **Flexible Control**: Adjust density based on document complexity
+        - **Optimized Display**: Auto font sizing prevents overcrowding
         """)
 
 if __name__ == "__main__":
